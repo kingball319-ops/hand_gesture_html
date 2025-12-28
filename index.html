@@ -2,31 +2,36 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<title>AI Hand Tracker Debug</title>
+<title>Mobile Hand Particle Debug</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
   body { margin:0; overflow:hidden; background:black; font-family: sans-serif; }
   video { display:none; }
-  #status {
+  /* Status text for mobile debugging */
+  #debug-info {
     position: fixed; top: 10px; left: 10px; color: #00ff00; 
-    background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; z-index: 20; font-size: 12px;
+    background: rgba(0,0,0,0.8); padding: 8px; border-radius: 5px; 
+    z-index: 100; font-size: 11px; pointer-events: none;
   }
   #overlay {
     position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.8); display: flex; flex-direction: column;
-    justify-content: center; align-items: center; z-index: 30; color: white;
+    background: rgba(0,0,0,0.9); display: flex; flex-direction: column;
+    justify-content: center; align-items: center; z-index: 200; color: white;
   }
-  button { padding: 15px 30px; font-size: 18px; cursor: pointer; background: #cc66ff; border: none; border-radius: 50px; color: white; }
+  button {
+    padding: 15px 40px; font-size: 18px; cursor: pointer;
+    background: #00ffcc; border: none; border-radius: 50px; color: black; font-weight: bold;
+  }
 </style>
 </head>
 <body>
 
-<div id="status">Status: Waiting for User...</div>
+<div id="debug-info">Status: Waiting for Start...</div>
 
 <div id="overlay">
-  <h2>AI Particle System</h2>
-  <p>Place hand 2-3 feet away from camera</p>
-  <button id="startButton">START EXPERIENCE</button>
+  <h3>AI Particle System</h3>
+  <p style="text-align:center; padding: 20px;">Ensure you are in a bright room.<br>Keep hand 2 feet away.</p>
+  <button id="startButton">START CAMERA</button>
 </div>
 
 <video id="video" autoplay playsinline></video>
@@ -36,68 +41,87 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
 
 <script>
-const statusDiv = document.getElementById('status');
-const videoElement = document.getElementById('video');
+const debug = document.getElementById('debug-info');
+const video = document.getElementById('video');
 
-// 1. THREE.js Setup (Shortened for brevity)
+// 1. Optimized THREE.js Scene
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500);
-camera.position.z = 65;
-const renderer = new THREE.WebGLRenderer({ antialias:false });
+camera.position.z = 60;
+const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true });
 renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2)); // Save battery/GPU
 document.body.appendChild(renderer.domElement);
 
-const geometry = new THREE.BufferGeometry();
-const count = 5000;
-const pos = new Float32Array(count * 3);
-for(let i=0; i<count*3; i++) pos[i] = (Math.random()-0.5)*50;
-geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-const particles = new THREE.Points(geometry, new THREE.PointsMaterial({size:0.5, color: 0xcc66ff}));
-scene.add(particles);
+const pointsGeom = new THREE.BufferGeometry();
+const pCount = 4000; // Lower count for mobile stability
+const pPos = new Float32Array(pCount * 3);
+for(let i=0; i<pCount*3; i++) pPos[i] = (Math.random()-0.5)*80;
+pointsGeom.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+const pMat = new THREE.PointsMaterial({ size: 0.6, color: 0x00ffcc, transparent: true, blending: THREE.AdditiveBlending });
+const particleSystem = new THREE.Points(pointsGeom, pMat);
+scene.add(particleSystem);
 
-// 2. MediaPipe Hands Setup
+// 2. Optimized MediaPipe Hands
 const hands = new Hands({
   locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
 });
 
-hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 0, // 0 is 'Lite' - Must for Mobile!
+  minDetectionConfidence: 0.5,
+  minTrackingConfidence: 0.5
+});
 
 hands.onResults((results) => {
   if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-    statusDiv.innerText = "Status: Hand Detected! Move it!";
-    const hand = results.multiHandLandmarks[0];
-    // Index finger tip (Landmark 8) se particles rotate karein
-    particles.rotation.y = hand[8].x * 5;
-    particles.rotation.x = hand[8].y * 5;
+    debug.innerText = "Status: HAND DETECTED!";
+    debug.style.color = "#00ff00";
+    const landmarks = results.multiHandLandmarks[0];
+    
+    // Smoothly rotate based on index finger tip (8)
+    particleSystem.rotation.y = (landmarks[8].x - 0.5) * 4;
+    particleSystem.rotation.x = (landmarks[8].y - 0.5) * 4;
   } else {
-    statusDiv.innerText = "Status: Searching for Hand...";
+    debug.innerText = "Status: No Hand in View...";
+    debug.style.color = "#ffcc00";
   }
 });
 
-// 3. Start Logic
+// 3. Start Camera & AI
 document.getElementById('startButton').addEventListener('click', async () => {
   document.getElementById('overlay').style.display = 'none';
-  statusDiv.innerText = "Status: Loading AI Models...";
-  
-  const cameraUtils = new Camera(videoElement, {
+  debug.innerText = "Status: Loading AI Models...";
+
+  const camHelper = new Camera(video, {
     onFrame: async () => {
-      await hands.send({image: videoElement});
+      await hands.send({image: video});
     },
-    width: 640, height: 480
+    width: 480, height: 360 // Lower resolution for faster processing
   });
 
-  cameraUtils.start().then(() => {
-    statusDiv.innerText = "Status: Camera On. Loading Hand Model...";
-  }).catch(err => {
-    statusDiv.innerText = "Status: Camera Error: " + err;
+  camHelper.start().then(() => {
+    debug.innerText = "Status: Camera On! Analyzing...";
+  }).catch(e => {
+    debug.innerText = "Error: " + e;
+    debug.style.color = "red";
   });
 
   function animate() {
     requestAnimationFrame(animate);
+    particleSystem.rotation.z += 0.002;
     renderer.render(scene, camera);
   }
   animate();
 });
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
 </script>
 </body>
 </html>
+
