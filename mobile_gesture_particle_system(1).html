@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Mobile Gesture Particle System</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  body { margin:0; overflow:hidden; background:black; touch-action:none; }
+  video { display:none; }
+</style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline></video>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.min.js"></script>
+
+<script>
+/* ---------------- MOBILE DETECTION ---------------- */
+const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+const PARTICLE_COUNT = isMobile ? 6000 : 12000;
+
+/* ---------------- THREE SETUP ---------------- */
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 500);
+camera.position.z = 65;
+
+const renderer = new THREE.WebGLRenderer({ antialias:false, powerPreference:"high-performance" });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.5 : 2));
+document.body.appendChild(renderer.domElement);
+
+/* ---------------- PARTICLES ---------------- */
+const geometry = new THREE.BufferGeometry();
+const positions = new Float32Array(PARTICLE_COUNT * 3);
+const colors = new Float32Array(PARTICLE_COUNT * 3);
+
+for (let i=0;i<PARTICLE_COUNT;i++){
+  positions[i*3] = (Math.random()-0.5)*40;
+  positions[i*3+1] = (Math.random()-0.5)*40;
+  positions[i*3+2] = (Math.random()-0.5)*40;
+
+  colors[i*3] = 0.8;
+  colors[i*3+1] = 0.4;
+  colors[i*3+2] = 1;
+}
+
+geometry.setAttribute('position', new THREE.BufferAttribute(positions,3));
+geometry.setAttribute('color', new THREE.BufferAttribute(colors,3));
+
+const material = new THREE.PointsMaterial({
+  size: isMobile ? 0.45 : 0.35,
+  transparent:true,
+  vertexColors:true,
+  depthWrite:false,
+  blending:THREE.AdditiveBlending
+});
+
+const particles = new THREE.Points(geometry, material);
+scene.add(particles);
+
+/* ---------------- SHAPES ---------------- */
+function heart(i){
+  const t = i/PARTICLE_COUNT*Math.PI*2;
+  return [
+    14*Math.pow(Math.sin(t),3),
+    11*Math.cos(t)-4*Math.cos(2*t)-2*Math.cos(3*t)-Math.cos(4*t),
+    (Math.random()-0.5)*6
+  ];
+}
+
+function flower(i){
+  const t = i/PARTICLE_COUNT*Math.PI*2;
+  const r = Math.sin(5*t)*12;
+  return [Math.cos(t)*r, Math.sin(t)*r, (Math.random()-0.5)*6];
+}
+
+function saturn(i){
+  const a = i/PARTICLE_COUNT*Math.PI*2;
+  return [Math.cos(a)*18, (Math.random()-0.5)*2, Math.sin(a)*18];
+}
+
+function galaxy(i){
+  const a = i/PARTICLE_COUNT*12;
+  const r = a*0.9;
+  return [Math.cos(a)*r, (Math.random()-0.5)*6, Math.sin(a)*r];
+}
+
+function dna(i){
+  const t = i/PARTICLE_COUNT*20;
+  return [Math.cos(t)*8, t-10, Math.sin(t)*8];
+}
+
+function fireworks(){
+  return [
+    (Math.random()-0.5)*30,
+    (Math.random()-0.5)*30,
+    (Math.random()-0.5)*30
+  ];
+}
+
+const SHAPES = [heart, flower, saturn, galaxy, dna];
+let currentShape = 0;
+
+/* ---------------- MORPH ---------------- */
+function morph(fn){
+  for(let i=0;i<PARTICLE_COUNT;i++){
+    const p = fn(i) || fireworks();
+    positions[i*3] = p[0];
+    positions[i*3+1] = p[1];
+    positions[i*3+2] = p[2];
+  }
+  geometry.attributes.position.needsUpdate = true;
+}
+
+/* ---------------- HAND TRACKING ---------------- */
+let openness = 0;
+let pinch = false;
+let speed = 0;
+let lastX = 0;
+
+const hands = new Hands({
+  locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+});
+
+hands.setOptions({
+  maxNumHands:1,
+  minDetectionConfidence:0.6,
+  minTrackingConfidence:0.6
+});
+
+hands.onResults(r=>{
+  if(!r.multiHandLandmarks[0]) return;
+  const lm = r.multiHandLandmarks[0];
+
+  const dx = lm[8].x - lm[4].x;
+  const dy = lm[8].y - lm[4].y;
+  pinch = Math.hypot(dx,dy) < 0.035;
+
+  openness = THREE.MathUtils.clamp(lm[12].y - lm[0].y, -0.3, 0.3);
+  speed = Math.abs(lm[9].x - lastX);
+  lastX = lm[9].x;
+});
+
+/* ---------------- CAMERA ---------------- */
+const cam = new Camera(document.getElementById("video"),{
+  onFrame:async()=>await hands.send({image:video}),
+  width:640,
+  height:480
+});
+cam.start();
+
+/* ---------------- ANIMATION ---------------- */
+let lastSwitch = 0;
+
+function animate(){
+  requestAnimationFrame(animate);
+
+  particles.rotation.y += 0.001 + speed*0.08;
+  particles.rotation.x += 0.0005;
+
+  for(let i=0;i<PARTICLE_COUNT;i+=3){
+    colors[i*3] = 0.5 + openness*3;
+    colors[i*3+1] = 0.3 + speed*4;
+    colors[i*3+2] = 1 - openness;
+  }
+  geometry.attributes.color.needsUpdate = true;
+
+  const t = performance.now()/1000;
+  if(pinch && t-lastSwitch>1){
+    currentShape = (currentShape+1)%SHAPES.length;
+    morph(SHAPES[currentShape]);
+    lastSwitch = t;
+  }
+
+  renderer.render(scene,camera);
+}
+
+morph(heart);
+animate();
+
+/* ---------------- RESIZE ---------------- */
+addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
